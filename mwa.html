@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — MWA Signer (Cadangan)</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 16px; background: #f6f7f9; color: #1a1a1a; }
+  .card { max-width: 640px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { font-size: 14px; line-height: 1.5; margin: 8px 0; }
+  .muted { color: #666; font-size: 13px; }
+  button { display: block; width: 100%; padding: 13px; margin: 10px 0; font-size: 16px; border: none; border-radius: 10px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .primary { background: #6c4cf1; color: #fff; }
+  .secondary { background: #eef0f3; color: #1a1a1a; }
+  textarea { width: 100%; min-height: 150px; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 10px; }
+  .box { background: #f6f7f9; border: 1px solid #e3e5e8; border-radius: 10px; padding: 10px; font-size: 13px; word-break: break-all; white-space: pre-wrap; }
+  .ok { color: #0a7d2c; } .err { color: #b00020; } .warn { color: #8a6d00; }
+  code { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Token Radar — Tanda Tangan via Mobile Wallet Adapter</h1>
+  <p class="muted">Jalur <b>cadangan</b> bila deep link Phantom tidak mengembalikan kunci enkripsi. Halaman ini memakai <b>Solana Mobile Wallet Adapter (MWA)</b> resmi lewat <b>Chrome Android</b> — Chrome akan membuka aplikasi Phantom secara lokal (bukan lewat deep link URL), dan hasilnya kembali lewat kanal MWA. Tidak ada seed phrase / private key yang diminta.</p>
+  <div id="status" class="box">Memuat…</div>
+  <p>Wallet yang terhubung: <b id="wallet">—</b></p>
+  <p class="muted">Wallet yang harus dipakai: <code>Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ</code> (MAKEFUN BOUNTY). Jika wallet yang terhubung berbeda, JANGAN lanjut.</p>
+  <button id="signBtn" type="button" class="primary">Tanda Tangani Pesan (MWA)</button>
+  <p class="muted">Pesan yang akan ditandatangani (dibuat baru saat tombol ditekan, berlaku 10 menit):</p>
+  <textarea id="msg" readonly></textarea>
+  <p>Signature (base58):</p>
+  <div id="sig" class="box">—</div>
+  <button id="copyBtn" type="button" class="secondary" disabled>Salin Signature</button>
+  <p class="muted">Setelah signature muncul, salin <b>pesan + signature</b> dan kirim ke agen. Agen memverifikasi lalu submit. Jangan kirim seed phrase / private key.</p>
+</div>
+<script type="module">
+import { transact } from 'https://esm.sh/@solana-mobile/mobile-wallet-adapter-protocol-web3js@2.2.1?bundle-deps';
+
+const EXPECTED_WALLET = 'Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ';
+const COMMIT = '4cb5be3e662e340ef244a54f49c31466c9a646ba';
+const TRANSCRIPTS = '3b597fec474c26f400216bcfb292de134249c6b196fc31899ec49c8f76b532b7';
+const statusEl = document.getElementById('status');
+const walletEl = document.getElementById('wallet');
+const msgEl = document.getElementById('msg');
+const sigEl = document.getElementById('sig');
+const signBtn = document.getElementById('signBtn');
+const copyBtn = document.getElementById('copyBtn');
+
+// ---- base58 (Bitcoin alphabet) ----
+const ALPH = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58encode(bytes) {
+  const digits = [0];
+  for (let i = 0; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) { carry += digits[j] << 8; digits[j] = carry % 58; carry = (carry / 58) | 0; }
+    while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = '';
+  for (let k = 0; k < bytes.length && bytes[k] === 0; k++) out += '1';
+  for (let m = digits.length - 1; m >= 0; m--) out += ALPH[digits[m]];
+  return out;
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function randHex(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); let s=''; for (let i=0;i<a.length;i++) s += ('0'+a[i].toString(16)).slice(-2); return s; }
+function setStatus(t, cls) { statusEl.textContent = t; statusEl.className = 'box' + (cls ? ' ' + cls : ''); }
+function buildMessage() {
+  const lines = [
+    'make.fun entry v1',
+    'Domain: make.fun',
+    'Competition: token-radar-01',
+    'Repo: https://github.com/ashatralife24/token-radar-01',
+    'Commit: ' + COMMIT,
+    'Transcripts: ' + TRANSCRIPTS,
+    'Wallet: ' + EXPECTED_WALLET,
+    'Nonce: ' + randHex(16),
+    'Issued At: ' + new Date().toISOString()
+  ];
+  return lines.join('\n');
+}
+
+signBtn.addEventListener('click', async () => {
+  const msg = buildMessage();
+  msgEl.value = msg;
+  const msgBytes = new TextEncoder().encode(msg);
+  signBtn.disabled = true;
+  setStatus('Membuka Phantom lewat Mobile Wallet Adapter… setujui di aplikasi Phantom.', '');
+  try {
+    const sigB58 = await transact(async (wallet) => {
+      const auth = await wallet.authorize({
+        chain: 'solana:mainnet',
+        identity: { name: 'Token Radar', uri: 'https://ashatralife24.github.io/token-radar-signer/' },
+      });
+      if (!auth || !auth.accounts || !auth.accounts.length) throw new Error('Phantom tidak mengembalikan akun.');
+      const addrB58 = b58encode(b64ToBytes(auth.accounts[0].address));
+      walletEl.textContent = addrB58;
+      if (addrB58 !== EXPECTED_WALLET) {
+        throw new Error('Wallet yang terhubung BUKAN MAKEFUN BOUNTY. Terhubung: ' + addrB58 + '. JANGAN lanjut — pakai wallet Coo3 di Phantom Android.');
+      }
+      const res = await wallet.signMessages({ addresses: [auth.accounts[0].address], payloads: [msgBytes] });
+      // signMessages mengembalikan array signature (Uint8Array) atau objek {signed_payloads}
+      let sigBytes = null;
+      if (Array.isArray(res) && res.length) {
+        const first = res[0];
+        if (first instanceof Uint8Array) sigBytes = first;
+        else if (first && first.signature) sigBytes = (typeof first.signature === 'string') ? b64ToBytes(first.signature) : first.signature;
+        else if (first && first.signed_payload) sigBytes = first.signed_payload;
+      } else if (res && res.signed_payloads && res.signed_payloads.length) {
+        const first = res.signed_payloads[0];
+        sigBytes = first.signature ? ((typeof first.signature === 'string') ? b64ToBytes(first.signature) : first.signature) : first;
+      }
+      if (!sigBytes || !(sigBytes instanceof Uint8Array) || sigBytes.length !== 64) {
+        throw new Error('Phantom tidak mengembalikan signature 64-byte. Hasil: ' + JSON.stringify(res).slice(0, 200));
+      }
+      return b58encode(sigBytes);
+    });
+    sigEl.textContent = sigB58;
+    copyBtn.disabled = false;
+    setStatus('Signature diterima. Salin pesan + signature dan kirim ke agen (berlaku 10 menit dari Issued At).', 'ok');
+  } catch (e) {
+    setStatus('Gagal: ' + (e && e.message ? e.message : e), 'err');
+  } finally {
+    signBtn.disabled = false;
+  }
+});
+
+copyBtn.addEventListener('click', () => {
+  const text = 'Pesan:\n' + msgEl.value + '\n\nSignature (base58):\n' + sigEl.textContent;
+  function done() { setStatus('Disalin. Kirim pesan + signature ini ke agen.', 'ok'); }
+  if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, () => fallback()); }
+  else fallback();
+  function fallback() {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { setStatus('Gagal menyalin otomatis — salin manual dari kolom di atas.', 'warn'); }
+    document.body.removeChild(ta);
+  }
+});
+
+setStatus('Siap. Buka halaman ini di Chrome Android, lalu tekan "Tanda Tangani Pesan (MWA)".', '');
+</script>
+</body>
+</html>
