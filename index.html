@@ -25,6 +25,7 @@
   <h1>Token Radar — Tanda Tangan via Phantom Deep Link</h1>
   <p class="muted">Halaman ini memakai <b>deep link resmi Phantom</b> (bukan browser dalam aplikasi). Buka halaman ini di <b>Chrome Android</b>. Saat menekan tombol, aplikasi Phantom akan terbuka; setujui di sana, lalu halaman ini kembali dengan hasilnya. Tidak ada seed phrase / private key yang diminta.</p>
   <div id="status" class="box">Memuat…</div>
+  <div id="diag" class="box muted" style="margin-top:8px;">Parameter di URL: —</div>
   <p>Wallet yang terhubung: <b id="wallet">—</b></p>
   <p class="muted">Wallet yang harus dipakai: <code>Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ</code> (MAKEFUN BOUNTY). Jika wallet yang terhubung berbeda, JANGAN lanjut.</p>
   <button id="connectBtn" type="button" class="primary">1. Hubungkan Phantom</button>
@@ -136,14 +137,32 @@
     return lines.join('\n');
   }
 
+  // ---- baca parameter hasil redirect (dari query ?... dan fragment #...) ----
+  function getAllParams() {
+    var out = {};
+    function add(str) {
+      if (!str) return;
+      var p = new URLSearchParams(str);
+      p.forEach(function (v, k) { if (!(k in out)) out[k] = v; });
+    }
+    add(window.location.search);
+    var h = window.location.hash || '';
+    if (h.charAt(0) === '#') h = h.slice(1);
+    add(h);
+    return out;
+  }
+
   // ---- tangani hasil redirect dari Phantom ----
   function handleRedirect() {
-    var q = new URLSearchParams(window.location.search);
-    var data = q.get('data'), nonce = q.get('nonce'), errCode = q.get('errorCode'), errMsg = q.get('errorMessage');
-    var phantomEncPub = q.get('phantom_encryption_public_key');
+    var q = getAllParams();
+    var names = Object.keys(q);
+    var diag = document.getElementById('diag');
+    if (diag) diag.textContent = 'Parameter di URL: ' + (names.length ? names.join(', ') : '(tidak ada)');
+    var data = q['data'], nonce = q['nonce'], errCode = q['errorCode'], errMsg = q['errorMessage'];
+    var phantomEncPub = q['phantom_encryption_public_key'] || q['phantomEncryptionPublicKey'] || q['encryption_public_key'];
     if (errCode) { setStatus('Phantom menolak: ' + errCode + (errMsg ? ' — ' + errMsg : ''), 'err'); return; }
     if (!data || !nonce) return; // bukan hasil redirect
-    if (!phantomEncPub) { setStatus('Hasil diterima tetapi phantom_encryption_public_key tidak ada di URL.', 'err'); return; }
+    if (!phantomEncPub) { setStatus('Hasil diterima tetapi phantom_encryption_public_key tidak ada di URL. Parameter yang ada: ' + names.join(', ') + '. Coba ulangi Connect dari halaman ini.', 'err'); return; }
     try {
       var obj = decryptData(data, nonce, phantomEncPub);
       if (obj.public_key && obj.session) {
