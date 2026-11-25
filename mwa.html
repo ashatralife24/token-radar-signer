@@ -24,19 +24,19 @@
 <div class="card">
   <h1>Token Radar — Tanda Tangan via Mobile Wallet Adapter</h1>
   <p class="muted">Jalur <b>cadangan</b> bila deep link Phantom tidak mengembalikan kunci enkripsi. Halaman ini memakai <b>Solana Mobile Wallet Adapter (MWA)</b> resmi lewat <b>Chrome Android</b> — Chrome akan membuka aplikasi Phantom secara lokal (bukan lewat deep link URL), dan hasilnya kembali lewat kanal MWA. Tidak ada seed phrase / private key yang diminta.</p>
-  <div id="status" class="box">Memuat…</div>
+  <div id="status" class="box">Memuat pustaka MWA… (butuh internet, mohon tunggu)</div>
   <p>Wallet yang terhubung: <b id="wallet">—</b></p>
   <p class="muted">Wallet yang harus dipakai: <code>Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ</code> (MAKEFUN BOUNTY). Jika wallet yang terhubung berbeda, JANGAN lanjut.</p>
   <button id="signBtn" type="button" class="primary">Tanda Tangani Pesan (MWA)</button>
-  <p class="muted">Pesan yang akan ditandatangani (dibuat baru saat tombol ditekan, berlaku 10 menit):</p>
-  <textarea id="msg" readonly></textarea>
+  <p class="muted">Pesan yang akan ditandatangani (tempel pesan dari agen, atau biarkan kosong agar dibuat baru saat tombol ditekan — berlaku 10 menit):</p>
+  <textarea id="msg" placeholder="Tempel pesan dari agen di sini, atau biarkan kosong — pesan baru akan dibuat saat tombol ditekan."></textarea>
   <p>Signature (base58):</p>
   <div id="sig" class="box">—</div>
   <button id="copyBtn" type="button" class="secondary" disabled>Salin Signature</button>
   <p class="muted">Setelah signature muncul, salin <b>pesan + signature</b> dan kirim ke agen. Agen memverifikasi lalu submit. Jangan kirim seed phrase / private key.</p>
 </div>
 <script type="module">
-import { transact } from 'https://esm.sh/@solana-mobile/mobile-wallet-adapter-protocol-web3js@2.2.1?bundle-deps';
+import { transact } from 'https://esm.sh/@solana-mobile/mobile-wallet-adapter-protocol-web3js@2.2.2?bundle-deps';
 
 const EXPECTED_WALLET = 'Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ';
 const COMMIT = '4cb5be3e662e340ef244a54f49c31466c9a646ba';
@@ -86,8 +86,8 @@ function buildMessage() {
 }
 
 signBtn.addEventListener('click', async () => {
-  const msg = buildMessage();
-  msgEl.value = msg;
+  let msg = msgEl.value.trim();
+  if (!msg) { msg = buildMessage(); msgEl.value = msg; }
   const msgBytes = new TextEncoder().encode(msg);
   signBtn.disabled = true;
   setStatus('Membuka Phantom lewat Mobile Wallet Adapter… setujui di aplikasi Phantom.', '');
@@ -143,6 +143,15 @@ copyBtn.addEventListener('click', () => {
 });
 
 setStatus('Siap. Buka halaman ini di Chrome Android, lalu tekan "Tanda Tangani Pesan (MWA)".', '');
+window.__mwaReady = true;
+</script>
+<script>
+setTimeout(function () {
+  if (!window.__mwaReady) {
+    var s = document.getElementById('status');
+    if (s) { s.textContent = 'Gagal memuat pustaka MWA (mungkin koneksi lambat / esm.sh tidak terjangkau). Muat ulang halaman ini di Chrome (tombol refresh).'; s.className = 'box err'; }
+  }
+}, 30000);
 </script>
 </body>
 </html>
