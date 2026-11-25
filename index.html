@@ -110,13 +110,13 @@
     var shared = nacl.box.before(b58decode(phantomEncPubB58), kp.secretKey);
     var nonce = nacl.randomBytes(24);
     var plain = utf8bytes(JSON.stringify(plainObj));
-    var cipher = nacl.box(plain, nonce, shared);
+    var cipher = nacl.box.after(plain, nonce, shared);
     return { payload: b58encode(cipher), nonce: b58encode(nonce) };
   }
   function decryptData(dataB58, nonceB58, phantomEncPubB58) {
     var kp = getKeypair();
     var shared = nacl.box.before(b58decode(phantomEncPubB58), kp.secretKey);
-    var plain = nacl.box.open(b58decode(dataB58), b58decode(nonceB58), shared);
+    var plain = nacl.box.open.after(b58decode(dataB58), b58decode(nonceB58), shared);
     if (!plain) throw new Error('gagal mendekripsi hasil (keypair/session tidak cocok)');
     return JSON.parse(utf8str(plain));
   }
