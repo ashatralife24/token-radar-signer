@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Radar — Tanda Tangan via Ekstensi Phantom (Komputer)</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 16px; background: #f6f6f6; color: #222; }
+  .card { max-width: 640px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 18px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { font-size: 15px; line-height: 1.5; }
+  .muted { color: #666; font-size: 14px; }
+  textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; min-height: 190px; }
+  textarea[readonly] { background: #f4f4f4; }
+  button { display: block; width: 100%; padding: 14px; font-size: 17px; font-weight: 700; border: 0; border-radius: 10px; background: #4f46e5; color: #fff; margin: 10px 0; cursor: pointer; }
+  button:disabled { background: #aaa; cursor: default; }
+  button.secondary { background: #0e7a3d; }
+  #status { font-size: 15px; padding: 10px; border-radius: 8px; margin: 10px 0; display: none; }
+  #status.err { display: block; background: #fdecea; color: #8b1e1e; }
+  #status.ok { display: block; background: #e6f4ea; color: #14532d; }
+  #status.info { display: block; background: #e8eefc; color: #1e3a8a; }
+  .label { font-weight: 700; margin: 14px 0 6px; }
+  #sigBox { display: none; }
+  code { word-break: break-all; }
+  ol { font-size: 15px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Token Radar — Tanda Tangan via Ekstensi Phantom (Komputer)</h1>
+  <p class="muted">Halaman ini untuk <b>Chrome di komputer</b> dengan <b>ekstensi Phantom</b>. Halaman ini <b>hanya</b> meminta tanda tangan atas sebuah pesan teks (tanpa biaya, tanpa memindahkan dana). Private key dan recovery phrase tidak pernah keluar dari Phantom, dan halaman ini tidak pernah memintanya.</p>
+  <p class="muted"><b>Penting:</b> wallet yang dipakai harus <b>MAKEFUN BOUNTY (Coo3)</b>, bukan wallet utama di PC. Kalau wallet yang terhubung bukan Coo3, JANGAN tanda tangan — ganti dulu wallet-nya di ekstensi Phantom.</p>
+
+  <div id="noPhantom" style="display:none">
+    <p><b>Ekstensi Phantom tidak terdeteksi di browser ini.</b></p>
+    <ol>
+      <li>Pasang <b>ekstensi Phantom resmi</b> dari Chrome Web Store di Chrome komputer.</li>
+      <li>Masuk ke ekstensi dengan <b>akun Google/Apple yang sama</b> seperti yang dipakai membuat wallet MAKEFUN BOUNTY di HP.</li>
+      <li>Pastikan wallet yang tampil di ekstensi adalah <b>MAKEFUN BOUNTY (Coo3)</b>.</li>
+      <li>Buka lagi halaman ini di Chrome yang sama.</li>
+    </ol>
+  </div>
+
+  <div id="main">
+    <div class="label">1. Wallet</div>
+    <p id="walletLine">Belum terhubung.</p>
+    <button id="connectBtn" type="button">Hubungkan Phantom</button>
+
+    <div class="label">2. Pesan yang akan ditandatangani</div>
+    <p class="muted">Tempel pesan entry dari Jokiku di bawah ini. Kalau kolom kosong, pesan baru (berlaku 10 menit) akan dibuat otomatis saat tombol ditekan.</p>
+    <textarea id="msg" spellcheck="false" placeholder="Tempel pesan entry dari Jokiku di sini, atau biarkan kosong — pesan baru akan dibuat saat tombol ditekan."></textarea>
+
+    <div class="label">Pesan persis yang akan ditandatangani (setelah dibersihkan)</div>
+    <textarea id="preview" readonly spellcheck="false"></textarea>
+
+    <button id="signBtn" type="button" class="secondary" disabled>Tanda Tangani Pesan</button>
+
+    <div id="status"></div>
+
+    <div id="sigBox">
+      <div class="label">Signature (base58) — salin dan kirim ke Jokiku</div>
+      <textarea id="sig" readonly spellcheck="false" style="min-height:90px"></textarea>
+      <button id="copyBtn" type="button">Salin Signature</button>
+      <div class="label">Pesan persis yang sudah ditandatangani</div>
+      <textarea id="signedMsg" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
+<script>
+var EXPECTED_WALLET = 'Coo3gDVDGgyXNGvcFxabCeGQrz1WnMD5HieRqLHe9yUJ';
+var COMMIT = '4cb5be3e662e340ef244a54f49c31466c9a646ba';
+var TRANSCRIPTS = '3b597fec474c26f400216bcfb292de134249c6b196fc31899ec49c8f76b532b7';
+
+var msgEl = document.getElementById('msg');
+var previewEl = document.getElementById('preview');
+var statusEl = document.getElementById('status');
+var walletLine = document.getElementById('walletLine');
+var connectBtn = document.getElementById('connectBtn');
+var signBtn = document.getElementById('signBtn');
+var sigBox = document.getElementById('sigBox');
+var sigEl = document.getElementById('sig');
+var signedMsgEl = document.getElementById('signedMsg');
+var connectedPubkey = null;
+
+function getProvider() {
+  try {
+    var p = (window.phantom && window.phantom.solana) || window.solana;
+    if (p && p.isPhantom) return p;
+  } catch (e) {}
+  return null;
+}
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = kind || '';
+}
+
+function normalizeMessage(t) {
+  return t.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/[ \t\n]+$/, '');
+}
+
+function randHex(n) {
+  var a = new Uint8Array(n);
+  crypto.getRandomValues(a);
+  var s = '';
+  for (var i = 0; i < a.length; i++) s += ('0' + a[i].toString(16)).slice(-2);
+  return s;
+}
+
+function buildMessage() {
+  var lines = [
+    'make.fun entry v1',
+    'Domain: make.fun',
+    'Competition: token-radar-01',
+    'Repo: https://github.com/ashatralife24/token-radar-01',
+    'Commit: ' + COMMIT,
+    'Transcripts: ' + TRANSCRIPTS,
+    'Wallet: ' + EXPECTED_WALLET,
+    'Nonce: ' + randHex(16),
+    'Issued At: ' + new Date().toISOString()
+  ];
+  return lines.join('\n');
+}
+
+function refreshPreview() {
+  previewEl.value = normalizeMessage(msgEl.value);
+}
+msgEl.addEventListener('input', refreshPreview);
+
+var B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Encode(bytes) {
+  var zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  var digits = [0];
+  for (var i = zeros; i < bytes.length; i++) {
+    var carry = bytes[i];
+    for (var j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  var out = '1'.repeat(zeros);
+  for (var k = digits.length - 1; k >= 0; k--) out += B58_ALPHABET[digits[k]];
+  return out;
+}
+
+function onConnected(pubkeyStr) {
+  connectedPubkey = pubkeyStr;
+  if (pubkeyStr === EXPECTED_WALLET) {
+    walletLine.innerHTML = 'Terhubung: <code>' + pubkeyStr + '</code> (wallet yang benar — MAKEFUN BOUNTY)';
+    signBtn.disabled = false;
+    setStatus('Wallet terhubung. Periksa pesannya, lalu ketuk "Tanda Tangani Pesan".', 'ok');
+  } else {
+    walletLine.innerHTML = 'Terhubung ke wallet yang SALAH: <code>' + pubkeyStr + '</code>. Beralihlah ke wallet <code>' + EXPECTED_WALLET + '</code> (MAKEFUN BOUNTY) di ekstensi Phantom sebelum lanjut.';
+    signBtn.disabled = true;
+    setStatus('Wallet yang terhubung bukan Coo3. Ganti wallet di ekstensi Phantom ke MAKEFUN BOUNTY, lalu muat ulang halaman ini.', 'err');
+  }
+}
+
+connectBtn.addEventListener('click', function () {
+  var provider = getProvider();
+  if (!provider) { showNoPhantom(); return; }
+  try {
+    if (provider.publicKey) {
+      onConnected(provider.publicKey.toString());
+      return;
+    }
+  } catch (e) {}
+  connectBtn.disabled = true;
+  connectBtn.textContent = 'Menghubungkan...';
+  setStatus('Meminta persetujuan ke Phantom...', 'info');
+  var done = false;
+  var timer = setTimeout(function () {
+    if (done) return;
+    done = true;
+    connectBtn.disabled = false;
+    connectBtn.textContent = 'Hubungkan Phantom';
+    setStatus('Phantom tidak merespons. Pastikan ekstensi Phantom sudah dibuka kuncinya, wallet ' + EXPECTED_WALLET + ' (MAKEFUN BOUNTY) sedang aktif, lalu muat ulang halaman ini.', 'err');
+  }, 15000);
+  provider.connect().then(function (resp) {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    connectBtn.disabled = false;
+    connectBtn.textContent = 'Hubungkan Phantom';
+    var pk = resp && resp.publicKey ? resp.publicKey.toString() : (provider.publicKey ? provider.publicKey.toString() : '');
+    if (pk) onConnected(pk);
+    else setStatus('Terhubung tetapi alamat wallet tidak terbaca. Muat ulang halaman dan coba lagi.', 'err');
+  }).catch(function (e) {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    connectBtn.disabled = false;
+    connectBtn.textContent = 'Hubungkan Phantom';
+    if (e && e.code === 4001) setStatus('Permintaan koneksi ditolak. Ketuk "Hubungkan Phantom" lagi untuk mencoba.', 'err');
+    else setStatus('Gagal menghubungkan: ' + (e && e.message ? e.message : e), 'err');
+  });
+});
+
+signBtn.addEventListener('click', function () {
+  var provider = getProvider();
+  if (!provider) { showNoPhantom(); return; }
+  var raw = msgEl.value.trim();
+  if (!raw) { raw = buildMessage(); msgEl.value = raw; refreshPreview(); }
+  var normalized = normalizeMessage(raw);
+  if (!normalized) { setStatus('Pesan kosong. Tempel pesan entry dari Jokiku.', 'err'); return; }
+  signBtn.disabled = true;
+  signBtn.textContent = 'Menunggu persetujuan Phantom...';
+  setStatus('Periksa pesan di layar persetujuan Phantom. Pastikan isinya persis sama, lalu setujui.', 'info');
+  var bytes = new TextEncoder().encode(normalized);
+  provider.signMessage(bytes, 'utf8').then(function (res) {
+    signBtn.disabled = false;
+    signBtn.textContent = 'Tanda Tangani Pesan';
+    var sigBytes = res && res.signature ? new Uint8Array(res.signature) : null;
+    if (!sigBytes) { setStatus('Phantom tidak mengembalikan signature. Coba lagi.', 'err'); return; }
+    var sigB58 = base58Encode(sigBytes);
+    sigEl.value = sigB58;
+    signedMsgEl.value = normalized;
+    sigBox.style.display = 'block';
+    setStatus('Berhasil ditandatangani. Salin signature di atas dan kirim ke Jokiku (bersama pesan yang ditandatangani).', 'ok');
+  }).catch(function (e) {
+    signBtn.disabled = false;
+    signBtn.textContent = 'Tanda Tangani Pesan';
+    if (e && e.code === 4001) setStatus('Penandatanganan ditolak. Ketuk "Tanda Tangani Pesan" lagi jika ingin mencoba.', 'err');
+    else setStatus('Gagal menandatangani: ' + (e && e.message ? e.message : e), 'err');
+  });
+});
+
+document.getElementById('copyBtn').addEventListener('click', function () {
+  sigEl.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(sigEl.value).catch(function(){});
+  }
+  setStatus('Signature disalin.', 'ok');
+});
+
+function showNoPhantom() {
+  document.getElementById('noPhantom').style.display = 'block';
+  document.getElementById('main').style.display = 'none';
+}
+
+(function init() {
+  refreshPreview();
+  var provider = getProvider();
+  if (!provider) { showNoPhantom(); return; }
+  signBtn.disabled = false;
+  try {
+    if (provider.publicKey) {
+      onConnected(provider.publicKey.toString());
+      return;
+    }
+  } catch (e) {}
+  if (provider.on) {
+    provider.on('accountChanged', function (pk) {
+      if (pk) onConnected(pk.toString());
+    });
+  }
+})();
+</script>
+</body>
+</html>
